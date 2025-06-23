@@ -1,0 +1,69 @@
+#puasing index calculation
+
+bigWigToBedGraph KO-1#-polII.sorted_RPM.bw KO-1#-polII.sorted_RPM.bedGraph
+mv "KO-1#-polII.sorted_RPM.bedGraph" "KO-1_polII.sorted_RPM.bedGraph"
+sort -k1,1 -k2,2n KO-1_polII.sorted_RPM.bedGraph > KO-1_polII.sorted_RPM.sorted.bedGraph
+sort -k1,1 -k2,2n gene_body_GRCm38.bed > gene_body_GRCm38_sorted.bed
+sort -k1,1 -k2,2n tss_GRCm38.bed > tss_GRCm38_sorted.bed
+bedtools map -a gene_body_GRCm38_sorted.bed -b KO-1_polII.sorted_RPM.sorted.bedGraph -c 4 -o mean > gene_body_KO-1_polII.sorted_RPM.txt
+bedtools map -a tss_GRCm38_sorted.bed -b KO-1_polII.sorted_RPM.sorted.bedGraph -c 4 -o mean > tss_KO-1_polII.sorted_RPM.txt
+
+library(dplyr)
+tss <- read.table(
+  "tss_KO-1_polII.sorted_RPM.txt", 
+  sep = "\t", 
+  header = FALSE, 
+  comment.char = "#"
+)
+gene_body <- read.table(
+  "gene_body_KO-1_polII.sorted_RPM.txt", 
+  sep = "\t", 
+  header = FALSE, 
+  comment.char = "#"
+)
+
+merged <- tss %>%
+  select(V4, RPM_tss = V5) %>%
+  inner_join(
+    gene_body %>% select(V4, RPM_gene_body = V5),
+    by = "V4"
+  )
+merged <- merged %>%
+  mutate(
+    PI = RPM_tss / RPM_gene_body
+  )
+
+gb_min <- quantile(merged$RPM_gene_body, probs = 0.1)
+merged_filtered <- merged %>%
+  filter(RPM_gene_body > gb_min)
+
+write.csv(
+  merged_filtered,
+  "KO-1_pausing_index.csv",
+  row.names = FALSE
+)
+
+summary(merged_filtered$PI)
+
+
+#!/bin/bash
+mkdir -p output
+
+for bw_file in *.bw; do
+  
+    base_name=$(basename "$bw_file" .bw)
+
+
+    bigWigToBedGraph "$bw_file" "${base_name}.bedGraph"
+
+    mv "${base_name}.bedGraph" "${base_name}_sorted.bedGraph"
+
+    sort -k1,1 -k2,2n "${base_name}_sorted.bedGraph" > "${base_name}_sorted.bedGraph.tmp"
+    mv "${base_name}_sorted.bedGraph.tmp" "${base_name}_sorted.bedGraph"
+    bedtools map -a gene_body_GRCm38_sorted.bed -b "${base_name}_sorted.bedGraph" -c 4 -o mean > "output/gene_body_${base_name}.txt"
+
+
+    bedtools map -a tss_GRCm38_sorted.bed -b "${base_name}_sorted.bedGraph" -c 4 -o mean > "output/tss_${base_name}.txt"
+
+    echo "fished: ${bw_file}"
+done
